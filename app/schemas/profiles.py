@@ -102,3 +102,28 @@ class ProfileCreateResponse(BaseModel):
 class ProfileSingleResponse(BaseModel):
     status: str = "success"
     data: ProfileFullView
+
+
+class ExportProfileQuery(BaseModel):
+    gender: str | None = None
+    country_id: str | None = None
+    age_group: str | None = None
+    min_age: int | None = Field(None, ge=0)
+    max_age: int | None = Field(None, ge=0)
+    sort_by: str = "created_at"
+    order: str = "desc"
+    format: str = "csv"
+
+
+class LisProfilesFilterQuery(BaseModel):
+    gender: str | None = None
+    country_id: str | None = None
+    age_group: str | None = None
+    min_age: int | None = Field(None, ge=0)
+    max_age: int | None = Field(None, ge=0)
+    min_gender_probability: float | None = Field(None, ge=0.0, le=1.0)
+    min_country_probability: float | None = Field(None, ge=0.0, le=1.0)
+    sort_by: str = "created_at"
+    order: str = "desc"
+    page: int = Field(1, ge=1)
+    limit: int = Field(10, ge=1, le=50)
