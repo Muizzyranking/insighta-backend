@@ -14,7 +14,8 @@ from app.exceptions import (
     validation_exception_handler,
 )
 from app.middleware.logging import RequestLoggingMiddleware
-from app.routers import auth, profiles
+from app.middleware.rate_limit import limiter
+from app.routers import admin, auth, profiles
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,6 +35,8 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
     )
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     app.add_middleware(
         CORSMiddleware,
