@@ -25,3 +25,13 @@ dev = [
     "ruff>=0.15.12",
     "uvicorn>=0.46.0",
 ]
+
+[tool.ruff.lint]
+select = [ "E", "F", "I", "B", "UP" ]
+
+ignore = [ "E501", "UP017", "B008", "UP042" ]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
