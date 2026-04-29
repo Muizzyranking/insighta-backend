@@ -104,7 +104,7 @@ async def export_profiles(
     db: DBSession,
     query: Annotated[ExportProfileQuery, Query()],
 ) -> StreamingResponse:
-    if format != "csv":
+    if query.format != "csv":
         raise APIException("Only csv format is supported", 400)
 
     profiles, _ = await query_profiles(
