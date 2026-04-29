@@ -35,3 +35,6 @@ ignore = [ "E501", "UP017", "B008", "UP042" ]
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
