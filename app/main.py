@@ -3,6 +3,13 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.exceptions import (
+    APIException,
+    api_exception_handler,
+    generic_exception_handler,
+    method_not_allowed_handler,
+    not_found_handler,
+)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
@@ -21,6 +28,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_exception_handler(APIException, api_exception_handler)
+    app.add_exception_handler(404, not_found_handler)
+    app.add_exception_handler(405, method_not_allowed_handler)
+    app.add_exception_handler(Exception, generic_exception_handler)
 
     return app
 
