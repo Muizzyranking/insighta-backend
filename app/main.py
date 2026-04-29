@@ -11,6 +11,7 @@ from app.exceptions import (
     method_not_allowed_handler,
     not_found_handler,
 )
+from app.middleware.logging import RequestLoggingMiddleware
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
@@ -36,6 +37,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestLoggingMiddleware)
+
     app.add_exception_handler(APIException, api_exception_handler)
     app.add_exception_handler(404, not_found_handler)
     app.add_exception_handler(405, method_not_allowed_handler)
