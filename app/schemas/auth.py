@@ -8,7 +8,7 @@ class TokenResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(..., min_length=1)
+    refresh_token: str | None = Field(None, min_length=1)
 
 
 class GitHubLoginQuery(BaseModel):
@@ -16,6 +16,7 @@ class GitHubLoginQuery(BaseModel):
     code_challenge: str | None = None
     code_challenge_method: str | None = "S256"
     code_verifier: str | None = None
+    redirect_uri: str | None = None
 
 
 class GithubCallbackQuery(BaseModel):
