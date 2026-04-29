@@ -12,6 +12,8 @@ from app.exceptions import (
     not_found_handler,
 )
 from app.middleware.logging import RequestLoggingMiddleware
+from app.routers import auth
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
@@ -43,6 +45,8 @@ def create_app() -> FastAPI:
     app.add_exception_handler(404, not_found_handler)
     app.add_exception_handler(405, method_not_allowed_handler)
     app.add_exception_handler(Exception, generic_exception_handler)
+
+    app.include_router(auth.router)
 
     return app
 
