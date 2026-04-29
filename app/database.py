@@ -1,0 +1,44 @@
+from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
+
+import uuid6
+from sqlalchemy import DateTime, String
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.config import settings
+
+engine = create_async_engine(
+    settings.database_url,
+    connect_args={"check_same_thread": False}
+    if "sqlite" in settings.database_url
+    else {},
+    echo=settings.app_env == "development",
+)
+
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+def new_uuid() -> str:
+    return str(uuid6.uuid7())
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class BaseModel(Base):
+    __abstract__ = True
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with SessionLocal() as session:
+        yield session
