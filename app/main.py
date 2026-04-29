@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
@@ -10,9 +11,10 @@ from app.exceptions import (
     generic_exception_handler,
     method_not_allowed_handler,
     not_found_handler,
+    validation_exception_handler,
 )
 from app.middleware.logging import RequestLoggingMiddleware
-from app.routers import auth
+from app.routers import auth, profiles
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,12 +43,14 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RequestLoggingMiddleware)
 
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(APIException, api_exception_handler)
     app.add_exception_handler(404, not_found_handler)
     app.add_exception_handler(405, method_not_allowed_handler)
     app.add_exception_handler(Exception, generic_exception_handler)
 
     app.include_router(auth.router)
+    app.include_router(profiles.router)
 
     return app
 

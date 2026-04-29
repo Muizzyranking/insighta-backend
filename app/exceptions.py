@@ -1,4 +1,5 @@
 from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
@@ -34,4 +35,22 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
     return JSONResponse(
         status_code=500,
         content={"status": "error", "message": "An unexpected error occurred"},
+    )
+
+
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    errors = exc.errors()
+    first = errors[0] if errors else {}
+
+    loc = first.get("loc", [])
+    msg = first.get("msg", "Validation error")
+    field = loc[-1] if loc else "field"
+
+    message = f"{field}: {msg}".lower()
+
+    return JSONResponse(
+        status_code=422,
+        content={"status": "error", "message": message},
     )
