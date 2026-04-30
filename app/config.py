@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     refresh_token_expire_minutes: int = 5
 
     database_url: str = "sqlite+aiosqlite:///./insighta.db"
+    frontend_url: str
 
 
 settings = Settings()
