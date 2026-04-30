@@ -55,8 +55,8 @@ async def build_profile_data(name: str) -> dict:
 async def _fetch_all(client: httpx.AsyncClient, name: str) -> tuple[dict, dict, dict]:
     try:
         gender_resp = await client.get(GENDERIZE_URL, params={"name": name})
-        age_resp = await client.get(AGIFY_URL, params={"name": name})
         nation_resp = await client.get(NATIONALIZE_URL, params={"name": name})
+        age_resp = await client.get(AGIFY_URL, params={"name": name})
         return gender_resp.json(), age_resp.json(), nation_resp.json()
     except httpx.RequestError as e:
         raise APIException("Failed to reach external APIs", 502) from e
