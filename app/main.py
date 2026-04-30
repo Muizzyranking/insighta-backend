@@ -7,7 +7,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
-from app.database import Base, engine
+from app.database import Base, SessionLocal, engine
 from app.exceptions import (
     APIException,
     api_exception_handler,
@@ -18,7 +18,8 @@ from app.exceptions import (
 )
 from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.rate_limit import limiter
-from app.routers import admin, auth, profiles, test
+from app.routers import admin, auth, profiles, test, users
+from app.services.seed import seed_test_users
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +30,11 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    if settings.app_env != "production":
+        async with SessionLocal() as db:
+            await seed_test_users(db)
+
     yield
 
 
@@ -43,7 +49,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.allowed_origins,
+        allow_origins=["*"],
         allow_methods=["*"],
         allow_headers=["*"],
         allow_credentials=True,
@@ -59,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(profiles.router)
     app.include_router(admin.router)
+    app.include_router(users.router)
     app.include_router(test.router)
 
     return app
