@@ -1,27 +1,14 @@
-FROM python:3.12-slim
+FROM python:3.12 AS builder
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PATH="/app/.venv/bin:$PATH"
-
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    curl \
-    ca-certificates \
-    netcat-openbsd \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
-COPY pyproject.toml uv.lock ./
-
-RUN uv sync --frozen --no-cache
-
+RUN python -m venv .venv
+COPY pyproject.toml ./
+RUN .venv/bin/pip install .
+FROM python:3.12-slim
+WORKDIR /app
+COPY --from=builder /app/.venv .venv/
 COPY . .
-
-EXPOSE 8000
-
-CMD ["sh", "-c", "uv run uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["/app/.venv/bin/fastapi", "run"]
