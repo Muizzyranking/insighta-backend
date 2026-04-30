@@ -3,13 +3,14 @@ from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Query, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 
 from app.config import settings
 from app.core.tokens import hash_token, issue_token_pair
 from app.dependencies import CurrentUser, DBSession
 from app.exceptions import APIException
+from app.middleware.rate_limit import limiter
 from app.models import RefreshToken, User
 from app.schemas.auth import (
     GithubCallbackQuery,
@@ -47,6 +48,7 @@ def _set_auth_cookies(response: Response, tokens: dict):
 
 
 @router.get("/github")
+@limiter.limit("10/minute")
 async def github_login(
     request: Request,
     query_params: Annotated[GitHubLoginQuery, Query()],
@@ -70,16 +72,38 @@ async def github_login(
         params["code_challenge"] = query_params.code_challenge
         params["code_challenge_method"] = query_params.code_challenge_method or "S256"
 
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    return RedirectResponse(f"https://github.com/login/oauth/authorize?{query}")
+    return RedirectResponse(
+        f"https://github.com/login/oauth/authorize?{urlencode(params)}"
+    )
 
 
 @router.get("/github/callback")
+@limiter.limit("10/minute")
 async def github_callback(
     request: Request,
     query: Annotated[GithubCallbackQuery, Query()],
     db: DBSession,
 ) -> RedirectResponse:
+    is_browser = "text/html" in request.headers.get("accept", "")
+
+    if not query.code:
+        if is_browser:
+            return RedirectResponse(
+                url=f"{settings.frontend_url}/auth/callback?{urlencode({'message': 'Missing code'})}"
+            )
+        raise APIException("Missing code", 400)
+
+    if not query.state:
+        if is_browser:
+            return RedirectResponse(
+                url=f"{settings.frontend_url}/auth/callback?{urlencode({'message': 'Missing state'})}"
+            )
+        raise APIException("Missing state", 400)
+
+    if query.state not in _pkce_store:
+        if not is_browser:
+            raise APIException("Invalid state", 400)
+
     try:
         stored = _pkce_store.pop(query.state, {})
         code_verifier = stored.get("code_verifier")
@@ -104,21 +128,29 @@ async def github_callback(
             )
             return RedirectResponse(f"{cli_redirect_uri}?{params}")
         else:
-            response = RedirectResponse(url="http://localhost:3000/auth/callback")
+            response = RedirectResponse(url=settings.frontend_url)
             _set_auth_cookies(response, tokens)
             return response
 
+    except APIException:
+        raise
+
     except Exception as exc:
         error_msg = getattr(exc, "detail", str(exc))
-        params = urlencode({"message": error_msg})
-        return RedirectResponse(url=f"http://localhost:3000/auth/callback?{params}")
+        if is_browser:
+            params = urlencode({"message": error_msg})
+            return RedirectResponse(
+                url=f"{settings.frontend_url}/auth/callback?{params}"
+            )
+        raise APIException(error_msg, 400) from exc
 
 
 @router.post("/refresh")
+@limiter.limit("10/minute")
 async def refresh_tokens(
     request: Request,
-    body: RefreshRequest,
     db: DBSession,
+    body: RefreshRequest | None = None,
 ):
 
     refresh_token = request.cookies.get("refresh_token") or (
@@ -155,18 +187,21 @@ async def refresh_tokens(
 
     tokens = await issue_token_pair(user, db)
 
-    if not request.cookies.get("refresh_token"):
-        return TokenResponse(**tokens)
-
-    response = Response(status_code=204)
-    _set_auth_cookies(response, tokens)
+    response = JSONResponse(
+        content={
+            "status": "success",
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens["refresh_token"],
+        }
+    )
+    if request.cookies.get("refresh_token"):
+        _set_auth_cookies(response, tokens)
     return response
 
 
-@router.post("/logout", status_code=204)
-async def logout(
-    request: Request, db: DBSession, body: RefreshRequest | None = None
-) -> Response:
+@router.post("/logout")
+@limiter.limit("10/minute")
+async def logout(request: Request, db: DBSession, body: RefreshRequest | None = None):
     refresh_token = request.cookies.get("refresh_token") or (
         body and body.refresh_token
     )
@@ -180,10 +215,10 @@ async def logout(
             stored.revoked = True
             await db.commit()
 
-    response = Response(status_code=204)
-    if request.cookies.get("refresh_token"):
-        response.delete_cookie("access_token")
-        response.delete_cookie("refresh_token")
+    response = JSONResponse(content={"status": "success"})
+    response.delete_cookie("access_token")
+    response.delete_cookie("refresh_token")
+
     return response
 
 
