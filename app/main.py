@@ -3,7 +3,10 @@ import logging
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
+from app.config import settings
 from app.database import Base, engine
 from app.exceptions import (
     APIException,
@@ -40,9 +43,10 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.allowed_origins,
         allow_methods=["*"],
         allow_headers=["*"],
+        allow_credentials=True,
     )
     app.add_middleware(RequestLoggingMiddleware)
 
@@ -54,6 +58,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(profiles.router)
+    app.include_router(admin.router)
 
     return app
 
