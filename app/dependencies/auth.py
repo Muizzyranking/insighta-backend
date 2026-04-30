@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,13 +17,21 @@ DBSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 async def get_current_user(
+    request: Request,
     credentials: BearerCredentials,
     db: DBSession,
 ) -> User:
-    if not credentials:
+    token: str | None = None
+
+    if credentials:
+        token = credentials.credentials
+    else:
+        token = request.cookies.get("access_token")
+
+    if not token:
         raise APIException("Authentication required", 401)
 
-    payload = decode_access_token(credentials.credentials)
+    payload = decode_access_token(token)
     user_id: str | None = payload.get("sub")
 
     if not user_id:

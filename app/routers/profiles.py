@@ -4,12 +4,14 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 import uuid6
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
 from app.dependencies import AdminUser, CurrentUser, DBSession
+from app.dependencies.versioning import require_api_version
 from app.exceptions import APIException
+from app.middleware.rate_limit import limiter
 from app.models import Profile
 from app.schemas.nl import NaturalLanguageQuery
 from app.schemas.profiles import (
@@ -27,10 +29,12 @@ from app.services.profiles import build_links, query_profiles
 router = APIRouter(
     prefix="/api/profiles",
     tags=["profiles"],
+    dependencies=[Depends(require_api_version)],
 )
 
 
 @router.post("", status_code=201)
+@limiter.limit("60/minute")
 async def create_profile(
     request: Request,
     body: ProfileCreateRequest,
@@ -66,6 +70,7 @@ async def create_profile(
 
 
 @router.get("/search")
+@limiter.limit("60/minute")
 async def search_profiles(
     request: Request,
     user: CurrentUser,
@@ -98,6 +103,7 @@ async def search_profiles(
 
 
 @router.get("/export")
+@limiter.limit("60/minute")
 async def export_profiles(
     request: Request,
     user: CurrentUser,
@@ -165,6 +171,7 @@ async def export_profiles(
 
 
 @router.get("")
+@limiter.limit("60/minute")
 async def list_profiles(
     request: Request,
     user: CurrentUser,
@@ -201,6 +208,7 @@ async def list_profiles(
 
 
 @router.get("/{profile_id}")
+@limiter.limit("60/minute")
 async def get_profile(
     request: Request,
     profile_id: str,

@@ -3,9 +3,22 @@ from httpx import AsyncClient
 
 from tests.conftest import make_access_token
 
+HEADERS = {"x-api-version": "1", "content-type": "application/json"}
+
 
 def auth_headers(user) -> dict:
-    return {"authorization": f"Bearer {make_access_token(user)}"}
+    return {**HEADERS, "authorization": f"Bearer {make_access_token(user)}"}
+
+
+@pytest.mark.asyncio
+async def test_create_profile_no_version_header(client: AsyncClient, admin_user):
+    resp = await client.post(
+        "/api/profiles",
+        json={"name": "Emmanuel"},
+        headers={"authorization": f"Bearer {make_access_token(admin_user)}"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["status"] == "error"
 
 
 @pytest.mark.asyncio
@@ -52,6 +65,15 @@ async def test_create_profile_invalid_name_type(client: AsyncClient, admin_user)
 async def test_list_profiles_no_auth(client: AsyncClient):
     resp = await client.get("/api/profiles", headers={"x-api-version": "1"})
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_profiles_no_version(client: AsyncClient, analyst_user):
+    resp = await client.get(
+        "/api/profiles",
+        headers={"authorization": f"Bearer {make_access_token(analyst_user)}"},
+    )
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio

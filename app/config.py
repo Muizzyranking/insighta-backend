@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     secret_key: str
+    allowed_origins: list[str] = ["http://localhost:3000"]
 
     github_client_id: str
     github_client_secret: str

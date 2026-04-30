@@ -1,5 +1,6 @@
 import secrets
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import RedirectResponse
@@ -25,6 +26,26 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _pkce_store: dict[str, str] = {}
 
 
+def _set_auth_cookies(response: Response, tokens: dict):
+    is_prod = settings.app_env == "production"
+    response.set_cookie(
+        key="access_token",
+        value=tokens["access_token"],
+        httponly=True,
+        secure=is_prod,
+        samesite="lax",
+        max_age=900,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=tokens["refresh_token"],
+        httponly=True,
+        secure=is_prod,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+    )
+
+
 @router.get("/github")
 async def github_login(
     request: Request,
@@ -34,7 +55,10 @@ async def github_login(
     state = query_params.state or secrets.token_urlsafe(16)
 
     if query_params.code_verifier:
-        _pkce_store[state] = query_params.code_verifier
+        _pkce_store[state] = {
+            "code_verifier": query_params.code_verifier,
+            "redirect_uri": query_params.redirect_uri,
+        }
 
     params = {
         "client_id": settings.github_client_id,
@@ -55,12 +79,39 @@ async def github_callback(
     request: Request,
     query: Annotated[GithubCallbackQuery, Query()],
     db: DBSession,
-) -> TokenResponse:
-    code_verifier = _pkce_store.pop(query.state, None)
-    github_user = await exchange_code_for_user(query.code, code_verifier)
-    user = await upsert_user(github_user, db)
-    tokens = await issue_token_pair(user, db)
-    return TokenResponse(**tokens)
+) -> RedirectResponse:
+    try:
+        stored = _pkce_store.pop(query.state, {})
+        code_verifier = stored.get("code_verifier")
+        cli_redirect_uri = stored.get("redirect_uri")
+
+        github_user = await exchange_code_for_user(query.code, code_verifier)
+        user = await upsert_user(github_user, db)
+        tokens = await issue_token_pair(user, db)
+
+        if cli_redirect_uri:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(cli_redirect_uri)
+            if parsed.hostname not in ("localhost", "127.0.0.1"):
+                raise APIException("Invalid CLI redirect URI", 400)
+
+            params = urlencode(
+                {
+                    "access_token": tokens["access_token"],
+                    "refresh_token": tokens["refresh_token"],
+                }
+            )
+            return RedirectResponse(f"{cli_redirect_uri}?{params}")
+        else:
+            response = RedirectResponse(url="http://localhost:3000/auth/callback")
+            _set_auth_cookies(response, tokens)
+            return response
+
+    except Exception as exc:
+        error_msg = getattr(exc, "detail", str(exc))
+        params = urlencode({"message": error_msg})
+        return RedirectResponse(url=f"http://localhost:3000/auth/callback?{params}")
 
 
 @router.post("/refresh")
@@ -68,8 +119,15 @@ async def refresh_tokens(
     request: Request,
     body: RefreshRequest,
     db: DBSession,
-) -> TokenResponse:
-    token_hash = hash_token(body.refresh_token)
+):
+
+    refresh_token = request.cookies.get("refresh_token") or (
+        body and body.refresh_token
+    )
+    if not refresh_token:
+        raise APIException("No refresh token", 401)
+
+    token_hash = hash_token(refresh_token)
 
     result = await db.execute(
         select(RefreshToken).where(RefreshToken.token_hash == token_hash)
@@ -96,27 +154,37 @@ async def refresh_tokens(
         raise APIException("Account is disabled", 403)
 
     tokens = await issue_token_pair(user, db)
-    return TokenResponse(**tokens)
+
+    if not request.cookies.get("refresh_token"):
+        return TokenResponse(**tokens)
+
+    response = Response(status_code=204)
+    _set_auth_cookies(response, tokens)
+    return response
 
 
 @router.post("/logout", status_code=204)
 async def logout(
-    request: Request,
-    body: RefreshRequest,
-    db: DBSession,
+    request: Request, db: DBSession, body: RefreshRequest | None = None
 ) -> Response:
-    token_hash = hash_token(body.refresh_token)
-
-    result = await db.execute(
-        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    refresh_token = request.cookies.get("refresh_token") or (
+        body and body.refresh_token
     )
-    stored = result.scalar_one_or_none()
+    if refresh_token:
+        token_hash = hash_token(refresh_token)
+        result = await db.execute(
+            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+        )
+        stored = result.scalar_one_or_none()
+        if stored and not stored.revoked:
+            stored.revoked = True
+            await db.commit()
 
-    if stored and not stored.revoked:
-        stored.revoked = True
-        await db.commit()
-
-    return Response(status_code=204)
+    response = Response(status_code=204)
+    if request.cookies.get("refresh_token"):
+        response.delete_cookie("access_token")
+        response.delete_cookie("refresh_token")
+    return response
 
 
 @router.get("/me")
