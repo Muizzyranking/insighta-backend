@@ -1,6 +1,7 @@
 import secrets
+import time
 from typing import Annotated
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -16,7 +17,6 @@ from app.schemas.auth import (
     GithubCallbackQuery,
     GitHubLoginQuery,
     RefreshRequest,
-    TokenResponse,
 )
 from app.schemas.users import UserOut
 from app.services.github import exchange_code_for_user
@@ -25,6 +25,7 @@ from app.services.users import upsert_user
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _pkce_store: dict[str, str] = {}
+_ott_store: dict[str, dict] = {}
 
 
 def _set_auth_cookies(response: Response, tokens: dict):
@@ -56,7 +57,7 @@ async def github_login(
 
     state = query_params.state or secrets.token_urlsafe(16)
 
-    if query_params.code_verifier:
+    if query_params.code_verifier or query_params.redirect_uri:
         _pkce_store[state] = {
             "code_verifier": query_params.code_verifier,
             "redirect_uri": query_params.redirect_uri,
@@ -84,69 +85,56 @@ async def github_callback(
     query: Annotated[GithubCallbackQuery, Query()],
     db: DBSession,
 ) -> RedirectResponse:
-    is_browser = "text/html" in request.headers.get("accept", "")
 
     if not query.code:
-        if is_browser:
-            return RedirectResponse(
-                url=f"{settings.frontend_url}/auth/callback?{urlencode({'message': 'Missing code'})}"
-            )
         raise APIException("Missing code", 400)
 
     if not query.state:
-        if is_browser:
-            return RedirectResponse(
-                url=f"{settings.frontend_url}/auth/callback?{urlencode({'message': 'Missing state'})}"
-            )
         raise APIException("Missing state", 400)
 
-    if query.state not in _pkce_store:
-        if not is_browser:
-            raise APIException("Invalid state", 400)
+    stored = _pkce_store.pop(query.state, {})
+    code_verifier = stored.get("code_verifier")
+    cli_redirect_uri = stored.get("redirect_uri")
 
-    try:
-        stored = _pkce_store.pop(query.state, {})
-        code_verifier = stored.get("code_verifier")
-        cli_redirect_uri = stored.get("redirect_uri")
+    github_user = await exchange_code_for_user(query.code, code_verifier)
+    user = await upsert_user(github_user, db)
+    tokens = await issue_token_pair(user, db)
 
-        github_user = await exchange_code_for_user(query.code, code_verifier)
-        user = await upsert_user(github_user, db)
-        tokens = await issue_token_pair(user, db)
+    one_time_token = secrets.token_urlsafe(32)
+    _ott_store[one_time_token] = {"tokens": tokens, "expires_at": time.time() + 60}
 
-        if cli_redirect_uri:
-            from urllib.parse import urlparse
+    if cli_redirect_uri:
+        parsed = urlparse(cli_redirect_uri)
+        if parsed.hostname not in ("localhost", "127.0.0.1"):
+            raise APIException("Invalid CLI redirect URI", 400)
 
-            parsed = urlparse(cli_redirect_uri)
-            if parsed.hostname not in ("localhost", "127.0.0.1"):
-                raise APIException("Invalid CLI redirect URI", 400)
+        params = urlencode(
+            {
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens["refresh_token"],
+            }
+        )
+        return RedirectResponse(f"{cli_redirect_uri}?{params}")
 
-            params = urlencode(
-                {
-                    "access_token": tokens["access_token"],
-                    "refresh_token": tokens["refresh_token"],
-                }
-            )
-            return RedirectResponse(f"{cli_redirect_uri}?{params}")
-        else:
-            response = RedirectResponse(url=settings.frontend_url)
-            _set_auth_cookies(response, tokens)
-            return response
+    return RedirectResponse(
+        url=f"{settings.frontend_url}/auth/callback?ott={one_time_token}"
+    )
 
-    except APIException:
-        raise
 
-    except Exception as exc:
-        error_msg = getattr(exc, "detail", str(exc))
-        if is_browser:
-            params = urlencode({"message": error_msg})
-            return RedirectResponse(
-                url=f"{settings.frontend_url}/auth/callback?{params}"
-            )
-        raise APIException(error_msg, 400) from exc
+@router.post("/session")
+@limiter.limit("10/minute")
+async def exchange_ott(request: Request, ott: str):
+    entry = _ott_store.pop(ott, None)
+    if not entry or time.time() > entry["expires_at"]:
+        raise APIException("Invalid or expired token", 400)
+
+    response = JSONResponse(content={"status": "success"})
+    _set_auth_cookies(response, entry["tokens"])
+    return response
 
 
 @router.post("/refresh")
-@limiter.limit("10/minute")
+@limiter.limit("11/minute")
 async def refresh_tokens(
     request: Request,
     db: DBSession,
@@ -200,7 +188,7 @@ async def refresh_tokens(
 
 
 @router.post("/logout")
-@limiter.limit("10/minute")
+@limiter.limit("11/minute")
 async def logout(request: Request, db: DBSession, body: RefreshRequest | None = None):
     refresh_token = request.cookies.get("refresh_token") or (
         body and body.refresh_token

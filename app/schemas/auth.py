@@ -20,5 +20,5 @@ class GitHubLoginQuery(BaseModel):
 
 
 class GithubCallbackQuery(BaseModel):
-    code: str
-    state: str
+    code: str | None = None
+    state: str | None = None
