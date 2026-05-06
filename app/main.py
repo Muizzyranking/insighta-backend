@@ -1,9 +1,9 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import _rate_limit_exceeded_handler
+from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
@@ -20,6 +20,14 @@ from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.rate_limit import limiter
 from app.routers import admin, auth, profiles, test, users
 from app.services.seed import seed_test_users
+
+
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"status": "error", "message": "Rate limit exceeded"},
+    )
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,14 +53,15 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        allow_credentials=True,
+        expose_headers=["X-API-Version"],
     )
     app.add_middleware(RequestLoggingMiddleware)
 
