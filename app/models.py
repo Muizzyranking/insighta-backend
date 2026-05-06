@@ -1,7 +1,16 @@
 import secrets
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import BaseModel
@@ -22,6 +31,22 @@ class Profile(BaseModel):
     country_id: Mapped[str] = mapped_column(String, nullable=False)
     country_name: Mapped[str] = mapped_column(String, nullable=False)
     country_probability: Mapped[float] = mapped_column(Float, nullable=False)
+
+    __table_args__ = (
+        # Single column indexes
+        Index("idx_profiles_gender", "gender"),
+        Index("idx_profiles_age_group", "age_group"),
+        Index("idx_profiles_country_id", "country_id"),
+        Index("idx_profiles_age", "age"),
+        Index("idx_profiles_created_at", "created_at"),
+        # Composite indexes for common filter combinations
+        Index("idx_profiles_gender_country", "gender", "country_id"),
+        Index("idx_profiles_gender_age_group", "gender", "age_group"),
+        Index("idx_profiles_country_age", "country_id", "age"),
+        Index(
+            "idx_profiles_gender_country_age_group", "gender", "country_id", "age_group"
+        ),
+    )
 
 
 class User(BaseModel):
