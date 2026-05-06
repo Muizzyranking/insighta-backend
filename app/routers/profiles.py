@@ -23,8 +23,9 @@ from app.schemas.profiles import (
     ProfileListResponse,
     ProfileSingleResponse,
 )
+from app.services.cache import cache_invalidate
 from app.services.nl_parser import parse_natural_language
-from app.services.profiles import build_links, query_profiles
+from app.services.profiles import build_links, query_profiles_cached
 
 router = APIRouter(
     prefix="/api/profiles",
@@ -65,6 +66,7 @@ async def create_profile(
     db.add(profile)
     await db.commit()
     await db.refresh(profile)
+    cache_invalidate()
 
     return ProfileCreateResponse(data=ProfileFullView.from_orm(profile))
 
@@ -81,7 +83,7 @@ async def search_profiles(
     page = query.page
     limit = min(query.limit, 50)
 
-    profiles, total = await query_profiles(
+    profiles, total = await query_profiles_cached(
         db,
         gender=filters.get("gender"),
         country_id=filters.get("country_id"),
@@ -113,7 +115,7 @@ async def export_profiles(
     if query.format != "csv":
         raise APIException("Only csv format is supported", 400)
 
-    profiles, _ = await query_profiles(
+    profiles, _ = await query_profiles_cached(
         db,
         gender=query.gender,
         country_id=query.country_id,
@@ -182,7 +184,7 @@ async def list_profiles(
     limit = min(query.limit, 50)
     page = query.page
 
-    profiles, total = await query_profiles(
+    profiles, total = await query_profiles_cached(
         db,
         gender=gender,
         country_id=query.country_id,
@@ -239,3 +241,4 @@ async def delete_profile(
 
     await db.delete(profile)
     await db.commit()
+    cache_invalidate()
