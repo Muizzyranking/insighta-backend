@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 import uuid6
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
@@ -24,6 +24,7 @@ from app.schemas.profiles import (
     ProfileSingleResponse,
 )
 from app.services.cache import cache_invalidate
+from app.services.ingestion import ingest_csv
 from app.services.nl_parser import parse_natural_language
 from app.services.profiles import build_links, query_profiles_cached
 
@@ -242,3 +243,23 @@ async def delete_profile(
     await db.delete(profile)
     await db.commit()
     cache_invalidate()
+
+
+@router.post("/import")
+@limiter.limit("10/minute")
+async def import_profiles(
+    request: Request,
+    user: AdminUser,
+    db: DBSession,
+    file: UploadFile = File(...),
+):
+
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise APIException("Only CSV files are accepted", 400)
+
+    file_bytes = await file.read()
+
+    if not file_bytes:
+        raise APIException("Uploaded file is empty", 400)
+
+    return await ingest_csv(db, file_bytes)
