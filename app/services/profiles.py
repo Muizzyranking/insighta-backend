@@ -3,6 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Profile
 from app.schemas.profiles import PaginationLinks, ProfileFullView
+from app.services.cache import cache_get, cache_set
+from app.services.normalizer import make_cache_key, normalize_filters
 
 ALLOWED_SORT = {"age", "created_at", "gender_probability"}
 VALID_GENDERS = {"male", "female"}
@@ -65,6 +67,58 @@ async def query_profiles(
     profiles = list(result.scalars().all())
 
     return [ProfileFullView.from_orm(p) for p in profiles], total
+
+
+async def query_profiles_cached(
+    db: AsyncSession,
+    gender: str | None = None,
+    country_id: str | None = None,
+    age_group: str | None = None,
+    min_age: int | None = None,
+    max_age: int | None = None,
+    min_gender_probability: float | None = None,
+    min_country_probability: float | None = None,
+    sort_by: str = "created_at",
+    order: str = "desc",
+    page: int = 1,
+    limit: int = 10,
+) -> tuple[list[ProfileFullView], int]:
+    canonical = normalize_filters(
+        gender=gender,
+        country_id=country_id,
+        age_group=age_group,
+        min_age=min_age,
+        max_age=max_age,
+        min_gender_probability=min_gender_probability,
+        min_country_probability=min_country_probability,
+        sort_by=sort_by,
+        order=order,
+        page=page,
+        limit=limit,
+    )
+    key = make_cache_key(canonical)
+
+    cached = cache_get(key)
+    if cached is not None:
+        return cached
+
+    result = await query_profiles(
+        db,
+        gender=gender,
+        country_id=country_id,
+        age_group=age_group,
+        min_age=min_age,
+        max_age=max_age,
+        min_gender_probability=min_gender_probability,
+        min_country_probability=min_country_probability,
+        sort_by=sort_by,
+        order=order,
+        page=page,
+        limit=limit,
+    )
+
+    cache_set(key, result)
+    return result
 
 
 def build_links(path: str, page: int, limit: int, total: int) -> PaginationLinks:
